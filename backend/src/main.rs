@@ -1,13 +1,13 @@
 extern crate web3;
 extern crate ipfsapi;
 use web3::contract::{Contract, Options};
-use web3::types::{Address, FilterBuilder};
+use web3::types::{Address, FilterBuilder, BlockNumber};
 use web3::futures::{Future, Stream};
 use ipfsapi::IpfsApi;
 
 fn main() {
 	// WEB3 WEBSOCKET
-    let (_eloop, transp) = web3::transports::WebSocket::new("ws://127.0.0.1:8545").unwrap();
+    let (_eloop, transp) = web3::transports::WebSocket::new("ws://127.0.0.1:8546").unwrap();
     let web3 = web3::Web3::new(transp);
     println!("a");
     let accounts = web3.eth().accounts().wait().unwrap();
@@ -39,7 +39,7 @@ fn main() {
     println!("{}", unwrapped_res);
     
     // FILTER LOGS
-    let filt = FilterBuilder::default().address(vec![contract_address]).build();
+    let filt = FilterBuilder::default().from_block(BlockNumber::Earliest).to_block(BlockNumber::Latest).address(vec![contract_address]).build();
     let mut sub = web3.eth_subscribe().subscribe_logs(filt).wait().unwrap();
 	println!("Got subscription id: {:?}", sub.id());
 

@@ -4,3 +4,4 @@ data_market/pnet/
 data_market/package-lock.json
 Cargo.lock
 backend/target/*
+backend/src/build

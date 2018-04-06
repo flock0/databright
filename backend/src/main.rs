@@ -1,9 +1,12 @@
 extern crate web3;
+extern crate ipfsapi;
 use web3::contract::{Contract, Options};
-use web3::types::{Address, U256, Filter, FilterBuilder};
+use web3::types::{Address, FilterBuilder};
 use web3::futures::{Future, Stream};
+use ipfsapi::IpfsApi;
 
 fn main() {
+	// WEB3 WEBSOCKET
     let (_eloop, transp) = web3::transports::WebSocket::new("ws://127.0.0.1:8545").unwrap();
     let web3 = web3::Web3::new(transp);
     println!("a");
@@ -20,12 +23,22 @@ fn main() {
         include_bytes!("../../data_market/contracts/SimpleDatabase.abi"),
     ).unwrap();
 
+    // IPFS
+	let api = IpfsApi::new("127.0.0.1", 5001);
+
+	let bytes = api.cat("QmWATWQ7fVPP2EFGu71UkfnqhYXDYH566qy47CnJDgvs8u").unwrap();
+	let data = String::from_utf8(bytes.collect()).unwrap();
+
+	println!("{}", data);
+
+	// SEND TRANSACTION
     let mut options = Options::default();
     options.gas = Some(200000.into());
     let result = contract.call("addShard", (my_acc, "test".to_string(),), my_acc, options);
     let unwrapped_res = result.wait().unwrap();
     println!("{}", unwrapped_res);
     
+    // FILTER LOGS
     let filt = FilterBuilder::default().address(vec![contract_address]).build();
     let mut sub = web3.eth_subscribe().subscribe_logs(filt).wait().unwrap();
 	println!("Got subscription id: {:?}", sub.id());

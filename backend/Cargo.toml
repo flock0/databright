@@ -5,3 +5,4 @@ authors = ["Florian Chlan <florian@chlan.net>"]
 
 [dependencies]
 web3 = "0.3.0"
+ipfsapi = "0.2"

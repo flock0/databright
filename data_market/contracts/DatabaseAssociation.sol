@@ -2,44 +2,29 @@ pragma solidity ^0.4.18;
 
 import "zeppelin-solidity/contracts/ownership/Ownable.sol";
 import "./SimpleDatabaseFactory.sol";
-
-contract tokenRecipient {
-    event receivedEther(address sender, uint amount);
-    event receivedTokens(address _from, uint256 _value, address _token, bytes _extraData);
-
-    function receiveApproval(address _from, uint256 _value, address _token, bytes _extraData) public {
-        Token t = Token(_token);
-        require(t.transferFrom(_from, this, _value));
-        receivedTokens(_from, _value, _token, _extraData);
-    }
-
-    function () payable public{
-        receivedEther(msg.sender, msg.value);
-    }
-}
-
-// Interfaces
-contract Token {
-    mapping (address => uint256) public balanceOf;
-    function transferFrom(address _from, address _to, uint256 _value) public returns (bool success);
-}
+import "./CuratorToken.sol";
 
 contract Database {
     function addShard(address _curator, string _ipfsHash) public returns (bool);
     
     function getShard(uint _i) public view returns (address, string);
+
+    function getNumberOfShards() public view returns (uint);
 }
 
 /**
  * The shareholder association contract itself
  */
-contract DatabaseAssociation is Ownable, tokenRecipient {
+contract DatabaseAssociation is Ownable {
 
     uint public minimumQuorum;
     uint public debatingPeriodInMinutes;
     Proposal[] public proposals;
     uint public numProposals;
-    Token public sharesTokenAddress;
+    uint public creationReward; // Temporary fixed reward for creating a new database, just so that voting on the first shard can happen
+    CuratorToken public sharesTokenAddress;
+    address initialCurator;
+    bool isFirstShard = false;
     SimpleDatabaseFactory public databaseFactory;
 
     event ProposalAdded(uint proposalID, address recipient, uint amount, string description, string argument, address curator, uint state);
@@ -59,6 +44,7 @@ contract DatabaseAssociation is Ownable, tokenRecipient {
         uint numberOfVotes;
         bytes32 proposalHash;
         string argument; //either name or ipfsHash
+        uint requestedReward; //proposed shares for shard
         address curator; //address for shard adder
         uint state;
         Vote[] votes;
@@ -81,9 +67,12 @@ contract DatabaseAssociation is Ownable, tokenRecipient {
      *
      * First time setup
      */
-    function DatabaseAssociation(Token sharesAddress, uint minimumSharesToPassAVote, uint minutesForDebate) payable public {
+    function DatabaseAssociation(uint minimumSharesToPassAVote, uint minutesForDebate) payable public {
+        CuratorToken sharesAddress = new CuratorToken();
         changeVotingRules(sharesAddress, minimumSharesToPassAVote, minutesForDebate);
         databaseFactory = new SimpleDatabaseFactory(); //create new factory
+        initialCurator = owner;
+        sharesTokenAddress.mint(initialCurator, minimumSharesToPassAVote);
         NewFactory(databaseFactory); //throw event!
     }
 
@@ -93,12 +82,13 @@ contract DatabaseAssociation is Ownable, tokenRecipient {
      * Make so that proposals need tobe discussed for at least `minutesForDebate/60` hours
      * and all voters combined must own more than `minimumSharesToPassAVote` shares of token `sharesAddress` to be executed
      *
-     * @param sharesAddress token address
+     * @param sharesAddress token address. The token must be owned by the contract
      * @param minimumSharesToPassAVote proposal can vote only if the sum of shares held by all voters exceed this number
      * @param minutesForDebate the minimum amount of delay between when a proposal is made and when it can be executed
      */
-    function changeVotingRules(Token sharesAddress, uint minimumSharesToPassAVote, uint minutesForDebate) onlyOwner public{
-        sharesTokenAddress = Token(sharesAddress);
+    function changeVotingRules(CuratorToken sharesAddress, uint minimumSharesToPassAVote, uint minutesForDebate) onlyOwner public{
+        sharesTokenAddress = CuratorToken(sharesAddress);
+        require(sharesTokenAddress.owner() == address(this));
         if (minimumSharesToPassAVote == 0 ) minimumSharesToPassAVote = 1;
         minimumQuorum = minimumSharesToPassAVote;
         debatingPeriodInMinutes = minutesForDebate;
@@ -121,6 +111,7 @@ contract DatabaseAssociation is Ownable, tokenRecipient {
         string jobDescription,
         bytes transactionBytecode,
         string argument,
+        uint requestedReward,
         address curator, //annoying but we need it to store the data owner
         uint state // use to save state (create database, shards etc)
     ) public
@@ -138,37 +129,13 @@ contract DatabaseAssociation is Ownable, tokenRecipient {
         p.proposalPassed = false;
         p.numberOfVotes = 0;
         p.argument = argument; //argument for creating database (name) or ipfsHash
+        p.requestedReward = requestedReward;
         p.curator = curator; //argument for curator but we can check for address(0) !
         p.state = state;
         ProposalAdded(proposalID, beneficiary, weiAmount, jobDescription, argument, curator, state);
         numProposals = proposalID+1;
 
         return proposalID;
-    }
-
-    /**
-     * Add proposal in Ether
-     *
-     * Propose to send `etherAmount` ether to `beneficiary` for `jobDescription`. `transactionBytecode ? Contains : Does not contain` code.
-     * This is a convenience function to use if the amount to be given is in round number of ether units.
-     *
-     * @param beneficiary who to send the ether to
-     * @param etherAmount amount of ether to send
-     * @param jobDescription Description of job
-     * @param transactionBytecode bytecode of transaction
-     */
-    function newProposalInEther(
-        address beneficiary,
-        uint etherAmount,
-        string jobDescription,
-        bytes transactionBytecode,
-        string argument,
-        address curator
-    ) public
-        //onlyShareholders
-        returns (uint proposalID)
-    {
-        return newProposal(beneficiary, etherAmount * 1 ether, jobDescription, transactionBytecode, argument, curator, 0);
     }
     
     /**
@@ -180,7 +147,7 @@ contract DatabaseAssociation is Ownable, tokenRecipient {
     ) public
         returns (uint proposalID)
     {
-        return newProposal(databaseFactory, 0, jobDescription, "", name,
+        return newProposal(databaseFactory, 0, jobDescription, "", name, 0,
                            address(0), 1);
     }
     
@@ -191,11 +158,12 @@ contract DatabaseAssociation is Ownable, tokenRecipient {
         address database,
         string jobDescription,
         string ipfsHash,
+        uint requestedReward,
         address curator
     ) public 
         returns (uint proposalID)
     {
-        return newProposal(database, 0, jobDescription, "", ipfsHash, curator, 2);
+        return newProposal(database, 0, jobDescription, "", ipfsHash, requestedReward, curator, 2);
     }
 
     /**
@@ -282,16 +250,23 @@ contract DatabaseAssociation is Ownable, tokenRecipient {
         if (yea > nay) {
             // Proposal passed; execute the transaction
 
-            p.executed = true;
             if (p.state == 1) {
-                require(databaseFactory.createDatabase(p.argument));
+                require(databaseFactory.createDatabase(p.argument));                
             } else if (p.state == 2) {
                 Database db = Database(p.recipient);
-                require(db.addShard(p.curator, p.argument));
+
+                require(db.addShard(p.curator, p.argument)); // TODO: Are the transactions atomic?
+                // if this is the first shard, burn the symbolic token of the owner
+                if(!isFirstShard) {
+                  sharesTokenAddress.burnFrom(initialCurator, minimumQuorum);
+                  isFirstShard = true;
+                }
+                require(sharesTokenAddress.mint(p.curator, p.requestedReward));
             } else {
                 require(p.recipient.call.value(p.amount)(transactionBytecode));
             }
 
+            p.executed = true;
             p.proposalPassed = true;
         } else {
             // Proposal failed

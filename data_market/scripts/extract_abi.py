@@ -10,7 +10,7 @@ for filename in os.listdir(json_dir):
 
 			trufflefile = json.load(infile)
 			abifilename = os.path.splitext(os.path.basename(filename))[0] + '.abi'
-			outfilepath = os.path.join(json_dir, abifilename)
+			outfilepath = os.path.join(json_dir, "..", abifilename)
 			with open(outfilepath, 'w') as outfile:
-				outfile.write(str(trufflefile['abi']))
+				outfile.write(json.dumps(trufflefile['abi']))
 

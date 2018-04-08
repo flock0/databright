@@ -16,11 +16,11 @@ fn main() {
     let balance = web3.eth().balance(my_acc, None).wait().unwrap();
     println!("Balance of {}: {}", my_acc, balance);
     // Accessing existing contract
-    let contract_address: Address = "370917ed5fdf51702e6d5d742c5b3434112e84ce".parse().unwrap(); // Address of the deployed SimpleDatabase contract
+    let contract_address: Address = "18c06846a71256d3af75f4b2948ba475e714b45b".parse().unwrap(); // Address of the deployed SimpleDatabase contract
     let contract = Contract::from_json(
         web3.eth(),
         contract_address,
-        include_bytes!("../../data_market/contracts/SimpleDatabase.abi"),
+        include_bytes!("../../data_market/build/SimpleDatabase.abi"),
     ).unwrap();
 
     // IPFS

@@ -12,11 +12,13 @@ pub mod data_loader {
     use log_handler::data_loader::regex::Regex;
     use log_handler::data_loader::image;
     use std::path::Path;
+    use std::ops::Range;
+    use std::collections::HashMap;
 
     pub trait DataLoader {
         type Feature;
         type Predictor;
-        fn load_all_samples(&self, filepaths: Vec<&str>) -> (Vec<Vec<Self::Feature>>, Vec<Self::Predictor>);
+        fn load_all_samples(&self, filepaths: Vec<(&str, Option<usize>)>) -> (Vec<Vec<Self::Feature>>, Vec<Self::Predictor>, HashMap<Option<usize>, Range<usize>>);
         fn vecs_as_matrix(&self, features: Vec<Vec<Self::Feature>>) -> Matrix<Self::Feature> {
             let samplecount = features.len();
             let featurescount = if samplecount > 0 {features[0].len()} else {0};
@@ -49,12 +51,28 @@ pub mod data_loader {
     impl DataLoader for CSVLoader{
         type Feature = f64;
         type Predictor = u32;
-        fn load_all_samples(&self, filepaths: Vec<&str>) -> (Vec<Vec<Self::Feature>>, Vec<Self::Predictor>) {
+        fn load_all_samples(&self, filepaths: Vec<(&str, Option<usize>)>) -> (Vec<Vec<Self::Feature>>, Vec<Self::Predictor>, HashMap<Option<usize>, Range<usize>>) {
             
             let mut all_features = Vec::new();
             let mut all_predictors = Vec::new();
+            let mut shard_attributions = HashMap::new();
 
-            for path in filepaths.iter() {
+            // Loop through all the paths and additionally keep track of which samples belong to which shards
+            let mut sample_index = 0; // Sample counter
+            let mut last_shard_opt = None;
+            let mut is_first_iter = true;
+            let mut last_shard_start_index = 0;
+            
+            for (path, shard_opt) in filepaths.iter() {
+                if is_first_iter {
+                    last_shard_opt = *shard_opt;
+                    is_first_iter = false;
+                } else if last_shard_opt != *shard_opt {
+                    shard_attributions.insert(last_shard_opt, last_shard_start_index..sample_index);
+                    last_shard_start_index = sample_index;
+                    last_shard_opt = *shard_opt;
+                }
+
                 let mut rdr = csv::ReaderBuilder::new()
                                 .has_headers(self.has_headers)
                                 .delimiter(self.delimiter)
@@ -75,10 +93,17 @@ pub mod data_loader {
                         }
                     }
                     all_features.push(rec_vec.to_owned());
+                    sample_index += 1;
                 }
+
+                
             }
 
-            (all_features, all_predictors)
+            if !is_first_iter {
+                shard_attributions.insert(last_shard_opt, last_shard_start_index..sample_index);
+            }
+
+            (all_features, all_predictors, shard_attributions)
         }
     }
 
@@ -90,12 +115,28 @@ pub mod data_loader {
     impl DataLoader for ImageLoader{
         type Feature = f64;
         type Predictor = u32;
-        fn load_all_samples(&self, filepaths: Vec<&str>) -> (Vec<Vec<Self::Feature>>, Vec<Self::Predictor>) {
+        fn load_all_samples(&self, filepaths: Vec<(&str, Option<usize>)>) -> (Vec<Vec<Self::Feature>>, Vec<Self::Predictor>, HashMap<Option<usize>, Range<usize>>) {
             
             let mut all_features = Vec::new();
             let mut all_predictors = Vec::new();
+            let mut shard_attributions = HashMap::new();
+            
+            // Loop through all the paths and additionally keep track of which samples belong to which shards
+            let mut sample_index = 0; // Sample counter
+            let mut last_shard_opt = None;
+            let mut is_first_iter = true;
+            let mut last_shard_start_index = 0;
 
-            for file_path in filepaths.iter() {
+            for (file_path, shard_opt) in filepaths.iter() {
+                if is_first_iter {
+                    last_shard_opt = *shard_opt;
+                    is_first_iter = false;
+                } else if last_shard_opt != *shard_opt {
+                    shard_attributions.insert(last_shard_opt, last_shard_start_index..sample_index);
+                    last_shard_start_index = sample_index;
+                    last_shard_opt = *shard_opt;
+                }
+
                 let path = Path::new(file_path);
                 let img = image::open(path).unwrap();
                 
@@ -107,9 +148,14 @@ pub mod data_loader {
                 let predictor = extracted_predictor.parse::<Self::Predictor>().unwrap();
 
                 all_predictors.push(predictor);
+                sample_index += 1;
             }
 
-            (all_features, all_predictors)
+            if !is_first_iter {
+                shard_attributions.insert(last_shard_opt, last_shard_start_index..sample_index);
+            }
+
+            (all_features, all_predictors, shard_attributions)
         }
     }
 }

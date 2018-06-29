@@ -155,14 +155,14 @@ pub fn handle_log<'a>(
                 for link in ls_res.objects[0].links.iter() {
                     debug!("Getting IPFS file {} from {}", &link.name, &link.hash);
                     let get_fut = ipfs_client.get(&link.hash).concat2();
-                    all_download_futures.push(get_fut.join(ok(shard_local_folder.join(&link.name))));
+                    all_download_futures.push(get_fut.join(ok((shard_local_folder.join(&link.name), id_opt))));
                 }
             }
             debug!("Fetching files from IPFS");
             let all_file_dls = event_loop.run(join_all(all_download_futures)).unwrap();
             debug!("Fetched {} files from IPFS", all_file_dls.len());
 
-            for (file_res, file_path) in all_file_dls.iter() {
+            for (file_res, (file_path, _)) in all_file_dls.iter() {
                 debug!("Writing file {:?}", file_path);
                 let file_content = file_res;
                 let mut tar_archive = Archive::new(file_content.as_ref());
@@ -174,19 +174,20 @@ pub fn handle_log<'a>(
             }
             debug!("Written shards to disk. Starting knn-shapley approximation...");
 
-            let file_paths = all_file_dls.iter().map(|(_, path)| path.to_str().unwrap()).collect();
+            let shard_attributed_file_paths = all_file_dls.iter().map(|(_, (path, shard_id_opt))| (path.to_str().unwrap(), **shard_id_opt)).collect();
             
             //TODO Load real file from smart contract and ipfs
             let dataformat_json_path = Path::new("./lorem_ipsum.json");
             let ldr = self::data_loader::data_loader::new(dataformat_json_path);
             let csv_ldr = ldr as CSVLoader;
-            let (features, predictors) = csv_ldr.load_all_samples(file_paths);
+            let (features, predictors, shard_attributions) = csv_ldr.load_all_samples(shard_attributed_file_paths);
             let X = csv_ldr.vecs_as_matrix(features);
             let y = csv_ldr.vec_as_vector(predictors);
 
             let cv_shapleys = knn_shapley::knn_shapley::run_shapley_cv(&X, &y, cv_num_splits);
-            println!("{:?}", cv_shapleys);
+            debug!("Cross-validation shapleys on sample-level{:?}", cv_shapleys);
             // TODO Sum up shapleys of shards (to get one shapley value per shard)
+            println!("{:?}", shard_attributions);
             // TODO Write it back to the blockchain
         }
     }

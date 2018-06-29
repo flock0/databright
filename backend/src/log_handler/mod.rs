@@ -44,6 +44,7 @@ pub fn handle_log<'a>(
     web3: &'a Web3<WebSocket>,
     tmp_folder_location: &'a str,
     event_loop: &mut tokio_core::reactor::Core,
+    cv_num_splits: usize
  ) {
     info!("Handling log: {:?}", log.topics[0]);
 
@@ -183,8 +184,7 @@ pub fn handle_log<'a>(
             let X = csv_ldr.vecs_as_matrix(features);
             let y = csv_ldr.vec_as_vector(predictors);
 
-            let num_splits = 5; //TODO Load from config.ini
-            let cv_shapleys = knn_shapley::knn_shapley::run_shapley_cv(&X, &y, num_splits);
+            let cv_shapleys = knn_shapley::knn_shapley::run_shapley_cv(&X, &y, cv_num_splits);
             println!("{:?}", cv_shapleys);
             // TODO Sum up shapleys of shards (to get one shapley value per shard)
             // TODO Write it back to the blockchain

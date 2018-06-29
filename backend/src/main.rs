@@ -50,13 +50,20 @@ fn main() {
     let mut event_loop = tokio_core::reactor::Core::new().unwrap();
     let ipfs_client = IpfsClient::new(ipfs_node_ip, ipfs_node_port.parse::<u16>().unwrap()).unwrap();
 
-    let localfolders_section = conf.section(Some("LocalFolders".to_owned())).unwrap();
-    let tmp_folder_location = localfolders_section.get("temp_data_storage_path").unwrap();
+    let loghandling_section = conf.section(Some("LogHandling".to_owned())).unwrap();
+    let tmp_folder_location = loghandling_section.get("temp_data_storage_path").unwrap();
     let reset_local_data_storage = {
-        let subscribe_string = localfolders_section.get("reset_local_data_storage").unwrap();
-        match subscribe_string.parse::<bool>() {
+        let rest_string = loghandling_section.get("reset_local_data_storage").unwrap();
+        match rest_string.parse::<bool>() {
             Ok(b) => b,
             Err(_) => {error!("Couldn't parse reset_local_data_storage from configuration. Not reseting local folder.."); false },
+        }
+    };
+    let cv_num_splits = {
+        let cv_num_splits_string = loghandling_section.get("cv_num_splits").unwrap();
+        match cv_num_splits_string.parse::<usize>() {
+            Ok(b) => b,
+            Err(_) => {error!("Couldn't parse cv_num_splits from configuration. Using 10 splits..."); 10 },
         }
     };
 
@@ -152,7 +159,7 @@ fn main() {
 
         let logs = event_loop.run(log_future).unwrap();
         for log in logs {
-            log_handler::handle_log(&log, &topics, &contract, &ipfs_client, &web3, &tmp_folder_location, &mut event_loop);
+            log_handler::handle_log(&log, &topics, &contract, &ipfs_client, &web3, &tmp_folder_location, &mut event_loop, cv_num_splits);
         }
         info!("Finished replay of events");
     }

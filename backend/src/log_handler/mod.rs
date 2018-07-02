@@ -185,9 +185,16 @@ pub fn handle_log<'a>(
             let y = csv_ldr.vec_as_vector(predictors);
 
             let cv_shapleys = knn_shapley::knn_shapley::run_shapley_cv(&X, &y, cv_num_splits);
-            debug!("Cross-validation shapleys on sample-level{:?}", cv_shapleys);
-            // TODO Sum up shapleys of shards (to get one shapley value per shard)
-            println!("{:?}", shard_attributions);
+            debug!("Cross-validation shapleys on sample-level {:?}", cv_shapleys);
+
+            // Sum up shapleys of shards (to get one shapley value per shard)
+            let shard_shapleys: Vec<f64> = shard_attributions.iter().map(|(shard_id_opt, range)| {
+                let sum: f64 = cv_shapleys[range.to_owned()].iter().sum();
+                debug!("Shapley of shard {:?} = {}", shard_id_opt, sum);
+                (shard_id_opt, sum)
+            })
+            .collect();
+
             // TODO Write it back to the blockchain
         }
     }

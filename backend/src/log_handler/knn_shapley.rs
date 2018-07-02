@@ -75,7 +75,7 @@ pub mod knn_shapley {
                 row_slice[*item] = scaled_shapleys[i];
             }
         }
-        let cv_shapleys: Vec<f64> = split_shapleys.sum_rows().iter().map(|shapley_sum| shapley_sum/((num_splits-1) as f64)).collect();
+        let cv_shapleys: Vec<f64> = split_shapleys.sum_rows().iter().map(|shapley_sum| shapley_sum/(num_splits as f64)).collect();
         cv_shapleys 
     }
 }

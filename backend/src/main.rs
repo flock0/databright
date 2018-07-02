@@ -7,6 +7,7 @@ extern crate web3;
 extern crate env_logger;
 extern crate ipfs_api;
 extern crate futures;
+extern crate ctrlc;
 
 use ini::Ini;
 use std::collections::HashMap;
@@ -18,12 +19,22 @@ use std::fs::remove_dir_all;
 use tokio_timer::Timer;
 use std::time::Duration;
 use ipfs_api::IpfsClient;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 mod log_handler;
 
 fn main() {
 
     env_logger::init();
+
+    // Install SIGINT/SIGTERM handler
+    let is_running = Arc::new(AtomicBool::new(true));
+    let cloned_is_running = is_running.clone();
+    ctrlc::set_handler(move || {
+        debug!("Caught shutdown signal. Breaking polling loop.");
+        cloned_is_running.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl-C handler");
 
     // Extract configuration from config.ini
     info!("Extracting configuration from config.ini..");
@@ -143,7 +154,7 @@ fn main() {
     let mut to_block = BlockNumber::Number(event_loop.run(current_block_future).unwrap().low_u64());
 
     // Enter polling loop
-    loop {
+    while is_running.load(Ordering::SeqCst) {
         
         // Retrieve logs since last processed block up until current block
         info!("Replaying events from block {:?} to {:?}.", from_block, to_block);
@@ -190,4 +201,6 @@ fn main() {
         to_block = BlockNumber::Number(event_loop.run(current_block_future).unwrap().low_u64());
         
     }
+
+    info!("Exited polling loop. Shutting down..");
 }

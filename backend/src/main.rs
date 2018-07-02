@@ -27,7 +27,8 @@ fn main() {
 
     // Extract configuration from config.ini
     info!("Extracting configuration from config.ini..");
-    let mut conf = Ini::load_from_file("config.ini").unwrap();
+    let config_filename = "config.ini";
+    let conf = Ini::load_from_file(&config_filename).unwrap();
     let contracts_section = conf.section(Some("Contracts".to_owned())).unwrap();
     let contracts = contracts_section.get("contracts").unwrap();
     let contract_address: Address = contracts_section.get("DatabaseAssociation").unwrap().parse().unwrap();
@@ -168,9 +169,15 @@ fn main() {
             log_handler::handle_log(&log, &topics, &contract, &ipfs_client, &web3, &tmp_folder_location, &mut event_loop, cv_num_splits);
         }
 
-        debug!("Finished handling of logs. Writing last processed block ({:?}) back to config file...", to_block);
-        conf.with_section(Some("Web3".to_owned())).set("last_processed_block_id", format!("{:?}", to_block));
-        conf.write_to_file("config.ini").unwrap();
+        let block_number_str = match to_block {
+            BlockNumber::Number(n) => format!("{}", n),
+            _ => {error!("to_block is not a Number(_). Will write '0' to the config file"); "0".to_string() }
+        };
+
+        debug!("Finished handling of logs. Writing last processed block ({}) back to config file...", block_number_str);
+        let mut conf_writer = Ini::load_from_file(&config_filename).unwrap();
+        conf_writer.with_section(Some("Web3".to_owned())).set("last_processed_block", block_number_str);
+        conf_writer.write_to_file(&config_filename).unwrap();
 
         info!("Finished this iteration. Sleeping for {} seconds...", polling_interval_sec);
         let timer = Timer::default();

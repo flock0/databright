@@ -6,15 +6,11 @@ extern crate web3;
 extern crate tar;
 
 use self::byteorder::{BigEndian, ByteOrder};
-use self::hyper::Chunk;
-use futures::{Stream, IntoFuture};
+use futures::Stream;
 use futures::future::{join_all, ok};
-use ipfs_api;
 use ipfs_api::IpfsClient;
-use std;
 use std::collections::HashMap;
-use std::fs::{create_dir_all, remove_dir_all, File};
-use std::io::Write;
+use std::fs::{create_dir_all, remove_dir_all};
 use std::path::Path;
 use std::str;
 use web3::Web3;
@@ -188,7 +184,7 @@ pub fn handle_log<'a>(
             debug!("Cross-validation shapleys on sample-level {:?}", cv_shapleys);
 
             // Sum up shapleys of shards (to get one shapley value per shard)
-            let shard_shapleys: Vec<f64> = shard_attributions.iter().map(|(shard_id_opt, range)| {
+            let shard_shapleys: Vec<(&Option<usize>, f64)> = shard_attributions.iter().map(|(shard_id_opt, range)| {
                 let sum: f64 = cv_shapleys[range.to_owned()].iter().sum();
                 debug!("Shapley of shard {:?} = {}", shard_id_opt, sum);
                 (shard_id_opt, sum)

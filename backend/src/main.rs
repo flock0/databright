@@ -1,6 +1,7 @@
 extern crate ini;
 extern crate csv;
 extern crate tokio_core;
+extern crate tokio_timer;
 extern crate web3;
 #[macro_use] extern crate log;
 extern crate env_logger;
@@ -14,7 +15,8 @@ use web3::types::{Address, FilterBuilder, BlockNumber, H256};
 use web3::futures::{Future, Stream};
 use std::str::FromStr;
 use std::fs::remove_dir_all;
-use futures::future::{join_all, ok};
+use tokio_timer::Timer;
+use std::time::Duration;
 use ipfs_api::IpfsClient;
 
 mod log_handler;
@@ -25,7 +27,7 @@ fn main() {
 
     // Extract configuration from config.ini
     info!("Extracting configuration from config.ini..");
-    let conf = Ini::load_from_file("config.ini").unwrap();
+    let mut conf = Ini::load_from_file("config.ini").unwrap();
     let contracts_section = conf.section(Some("Contracts".to_owned())).unwrap();
     let contracts = contracts_section.get("contracts").unwrap();
     let contract_address: Address = contracts_section.get("DatabaseAssociation").unwrap().parse().unwrap();
@@ -34,15 +36,22 @@ fn main() {
 
     let web3_section = conf.section(Some("Web3".to_owned())).unwrap();
     let ws_url = web3_section.get("websocket_transport_url").unwrap();
-    let replay_past_events = {
-        let replay_string = web3_section.get("replay_past_events").unwrap();
-        match replay_string.parse::<bool>() {
+
+    let last_processed_block = {
+        let last_block_string = web3_section.get("last_processed_block").unwrap();
+        match last_block_string.parse::<u64>() {
+                Ok(n) => BlockNumber::Number(n),
+                Err(_) => {warn!("Couldn't parse last_processed_block from configuration. Starting from earliest block..."); BlockNumber::Earliest },
+            }
+    };
+    
+    let polling_interval_sec = {
+        let polling_interval_string = web3_section.get("polling_interval_sec").unwrap();
+        match polling_interval_string.parse::<u64>() {
             Ok(b) => b,
-            Err(_) => {error!("Couldn't parse replay_past_events from configuration. Skipping events from the past.."); false },
+            Err(_) => {error!("Couldn't parse polling_interval_sec from configuration. Will wait for 1 hour by default.."); 3600 },
         }
     };
-
-    let last_processed_block_id = web3_section.get("last_processed_block_id").unwrap();
 
     let ipfs_section = conf.section(Some("Ipfs".to_owned())).unwrap();
     let ipfs_node_ip = ipfs_section.get("node_ip").unwrap();
@@ -128,22 +137,19 @@ fn main() {
         info!("Listening for {} events", num_events);
     }
 
-    // Retrieve logs since last processed block
-    if replay_past_events {
-        info!("replay_past_events is true. Will replay events from the past..");
-        let from_block = if last_processed_block_id.is_empty() {
-                BlockNumber::Earliest
-            } else {
-                match last_processed_block_id.parse::<u64>() {
-                    Ok(n) => BlockNumber::Number(n),
-                    Err(_) => {warn!("Couldn't parse last_processed_block_id from configuration. Starting from earliest block..."); BlockNumber::Earliest },
-                }
-            };
-        info!("Replaying events from {:?} to latest block", from_block);
+    let mut from_block = last_processed_block;
+    let current_block_future = web3.eth().block_number();
+    let mut to_block = BlockNumber::Number(event_loop.run(current_block_future).unwrap().low_u64());
+
+    // Enter polling loop
+    loop {
+        
+        // Retrieve logs since last processed block up until current block
+        info!("Replaying events from block {:?} to {:?}.", from_block, to_block);
         let filter = FilterBuilder::default()
             .address(vec![contract.address()])
             .from_block(from_block)
-            .to_block(BlockNumber::Latest)
+            .to_block(to_block)
             .topics(
                 desired_topics.clone(),
                 None,
@@ -161,6 +167,20 @@ fn main() {
         for log in logs {
             log_handler::handle_log(&log, &topics, &contract, &ipfs_client, &web3, &tmp_folder_location, &mut event_loop, cv_num_splits);
         }
-        info!("Finished replay of events");
+
+        debug!("Finished handling of logs. Writing last processed block ({:?}) back to config file...", to_block);
+        conf.with_section(Some("Web3".to_owned())).set("last_processed_block_id", format!("{:?}", to_block));
+        conf.write_to_file("config.ini").unwrap();
+
+        info!("Finished this iteration. Sleeping for {} seconds...", polling_interval_sec);
+        let timer = Timer::default();
+        let dur = Duration::from_secs(polling_interval_sec);
+        event_loop.run(timer.sleep(dur));
+        
+        debug!("Woke up from sleep. Will update from_ and to_block.");
+        from_block = to_block;
+        let current_block_future = web3.eth().block_number();
+        to_block = BlockNumber::Number(event_loop.run(current_block_future).unwrap().low_u64());
+        
     }
 }
